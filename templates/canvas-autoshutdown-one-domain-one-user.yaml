@@ -1,0 +1,144 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+Parameters:
+  IdleTimeout:
+    Type: Number
+    Description: Time (in seconds) that the SageMaker Canvas app is allowed to stay in idle before gets shutdown. Default value is 2 hours.
+    Default: 7200
+  AlarmPeriod:
+    Type: Number
+    Description: Aggregation time (in seconds) used by CloudWatch Alarm to compute the idle timeout. Default value is 15 minutes.
+    Default: 60
+  DomainId: 
+    Type: String
+    Description: The domain ID to monitor for idle Canvas apps.
+    AllowedPattern: 'd-[a-zA-Z0-9]{12}'
+    ConstraintDescription: Must start with 'd-' followed by 12 alphanumeric characters.
+  UserProfileName: 
+    Type: String
+    Description: The domain ID to monitor for idle Canvas apps.
+
+Resources:
+  DeleteCanvasAppFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-DeleteCanvasAppFunction
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Timeout: 30
+      MemorySize: 128
+      ReservedConcurrentExecutions: 1
+      Code:
+        ZipFile: |
+          import boto3
+          from botocore.config import Config
+          import os
+          import datetime
+          
+          def lambda_handler(event, context):
+              region = event['region']
+              
+              try:
+                config = Config(region_name=region)
+                cloudwatch = boto3.client('cloudwatch', config=config)
+                sagemaker = boto3.client('sagemaker', config=config)
+                # Check which user is in timeout
+                metric_data_results = cloudwatch.get_metric_data(
+                  MetricDataQueries=[
+                      {
+                          "Id": "q1",
+                          "Expression": f'SELECT AVG(TimeSinceLastActive) FROM "/aws/sagemaker/Canvas/AppActivity" WHERE DomainId=\'{os.environ['DOMAIN_ID']}\' AND UserProfileName=\'{os.environ['USER_PROFILE_NAME']}\' GROUP BY DomainId, UserProfileName',
+                          "Period": int(os.environ['ALARM_PERIOD'])
+                      }
+                  ],
+                  StartTime=datetime.datetime(2023, 10, 20),
+                  EndTime=datetime.datetime.now(),
+                  ScanBy='TimestampAscending'
+                )
+                for metric in metric_data_results['MetricDataResults']:
+                  domain_id, user_profile_name = metric['Label'].split(' ')
+                  latest_value = metric['Values'][-1]
+                  if latest_value >= int(os.environ['TIMEOUT_THRESHOLD']):
+                    print(f"Canvas App for {user_profile_name} in domain {domain_id} will be deleted.")
+                    response = sagemaker.delete_app(
+                      DomainId=domain_id,
+                      UserProfileName=user_profile_name,
+                      AppType='Canvas',
+                      AppName='default'
+                    )
+              except Exception as e:
+                print(str(e))
+                raise e
+      Environment:
+        Variables:
+          TIMEOUT_THRESHOLD: !Ref IdleTimeout
+          ALARM_PERIOD: !Ref AlarmPeriod
+          DOMAIN_ID: !Ref DomainId
+          USER_PROFILE_NAME: !Ref UserProfileName
+  EventBridgeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DeleteCanvasAppFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventBridgeToLambdaRule.Arn
+  LambdaExecutionRole: 
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'cloudwatch:GetMetricData'
+                Resource: '*'  
+              - Effect: Allow
+                Action:
+                  - 'sagemaker:DeleteApp'
+                Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/${DomainId}/${UserProfileName}/canvas/default
+  TimeSinceLastActiveAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-TimeSinceLastActiveAlarm
+      AlarmDescription: Alarm when TimeSinceLastActive exceeds 2 hours
+      EvaluationPeriods: 1
+      Threshold: !Ref IdleTimeout
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: ignore
+      Metrics:
+      - Id: q1
+        Label: Find the highest timeout across all of the user profiles
+        Expression: !Sub SELECT MAX(TimeSinceLastActive) FROM "/aws/sagemaker/Canvas/AppActivity" WHERE DomainId='${DomainId}' AND UserProfileName='${UserProfileName}'
+        Period: !Ref AlarmPeriod
+  EventBridgeToLambdaRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${AWS::StackName}-CanvasAutoShutdownRule
+      Description: Rule that executes a Lambda function whenever the Alarm is triggered
+      EventBusName: default
+      EventPattern:
+        source: 
+          - aws.cloudwatch
+        detail-type: 
+          - "CloudWatch Alarm State Change"
+        resources:
+          - !GetAtt TimeSinceLastActiveAlarm.Arn
+      State: ENABLED
+      Targets: 
+        - Arn: !GetAtt DeleteCanvasAppFunction.Arn
+          Id: DeleteCanvasAppFunction
