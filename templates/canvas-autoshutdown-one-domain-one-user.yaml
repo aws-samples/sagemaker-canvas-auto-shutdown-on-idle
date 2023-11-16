@@ -7,8 +7,8 @@ Parameters:
     Default: 7200
   AlarmPeriod:
     Type: Number
-    Description: Aggregation time (in seconds) used by CloudWatch Alarm to compute the idle timeout. Default value is 15 minutes.
-    Default: 30
+    Description: Aggregation time (in seconds) used by CloudWatch Alarm to compute the idle timeout. Default value is 20 minutes.
+    Default: 1200
   DomainId: 
     Type: String
     Description: The domain ID to monitor for idle Canvas apps.
