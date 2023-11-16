@@ -115,7 +115,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: !Ref IdleTimeout
       ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: ignore
+      TreatMissingData: notBreaching
       Metrics:
       - Id: q1
         Label: Find the highest timeout across all of the user profiles
