@@ -57,13 +57,23 @@ Resources:
                   domain_id, user_profile_name = metric['Label'].split(' ')
                   latest_value = metric['Values'][-1]
                   if latest_value >= int(os.environ['TIMEOUT_THRESHOLD']):
-                    print(f"Canvas App for {user_profile_name} in domain {domain_id} will be deleted.")
-                    response = sagemaker.delete_app(
+                    status = sagemaker.describe_app(
                       DomainId=domain_id,
                       UserProfileName=user_profile_name,
                       AppType='Canvas',
                       AppName='default'
-                    )
+                    )['Status'] # Possible options: 'Deleted'|'Deleting'|'Failed'|'InService'|'Pending'
+                    if status == 'InService':
+                      print(f"Canvas App for {user_profile_name} in domain {domain_id} will be deleted.")
+                      response = sagemaker.delete_app(
+                        DomainId=domain_id,
+                        UserProfileName=user_profile_name,
+                        AppType='Canvas',
+                        AppName='default'
+                      )
+                    else:
+                      print(f"Canvas App for {user_profile_name} in domain {domain_id} is in {status} status. Will not delete for now.")
+                      continue
               except Exception as e:
                 print(str(e))
                 raise e
@@ -106,6 +116,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - 'sagemaker:DeleteApp'
+                  - 'sagemaker:DescribeApp'
                 Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/${DomainId}/*/canvas/default
   TimeSinceLastActiveAlarm:
     Type: AWS::CloudWatch::Alarm

@@ -1,3 +1,10 @@
+# 0.2 (2024-05-15) - Minor Updates
+
+Addressing Issues #1 and #2. 
+
+- Fixed a minor bug with Lambda trying to delete apps already in Deleted status and failing
+- Changed the hardcoded value of the GetMetricData StartTime
+
 # 0.1 (2023-10-24) - Inital Release 
 
 ## Release Highlight
