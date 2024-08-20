@@ -121,7 +121,9 @@ Resources:
                 Action:
                   - 'sagemaker:DeleteApp'
                   - 'sagemaker:DescribeApp'
-                Resource: !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/${DomainId}/${UserProfileName}/canvas/default
+                Resource: 
+                  - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*/*/canvas/default
+                  - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*/*/Canvas/default
   TimeSinceLastActiveAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
