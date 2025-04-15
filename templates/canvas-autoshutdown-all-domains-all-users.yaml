@@ -9,6 +9,13 @@ Parameters:
     Type: Number
     Description: Aggregation time (in seconds) used by CloudWatch Alarm to compute the idle timeout. Default value is 20 minutes.
     Default: 1200
+  AlarmState:
+    Type: String
+    AllowedValues: 
+      - "True"
+      - "False"
+    Default: "True"
+    Description: Should your Lambda function automatically set the alarm status to OK after execution. 
 
 Resources:
   DeleteCanvasAppFunction:
@@ -29,7 +36,7 @@ Resources:
           import datetime
           
           def lambda_handler(event, context):
-              region = event['region']
+              region = event['region'] 
               
               try:
                 config = Config(region_name=region)
@@ -51,6 +58,7 @@ Resources:
                 for metric in metric_data_results['MetricDataResults']:
                   domain_id, user_profile_name = metric['Label'].split(' ')
                   latest_value = metric['Values'][-1]
+
                   if latest_value >= int(os.environ['TIMEOUT_THRESHOLD']):
                     status = sagemaker.describe_app(
                       DomainId=domain_id,
@@ -69,6 +77,13 @@ Resources:
                     else:
                       print(f"Canvas App for {user_profile_name} in domain {domain_id} is in {status} status. Will not delete for now.")
                       continue
+                    if os.environ['SET_ALARM_OK'] == "True":
+                      cw_alarm = event['detail']['alarmName']
+                      resp = cloudwatch.set_alarm_state(
+                        AlarmName=cw_alarm,
+                        StateValue='OK',
+                        StateReason='Set to OK by Canvas Shutdown Lambda function',
+                        StateReasonData='{"actionOrigin": "CanvasShutdownAutomation"}') 
               except Exception as e:
                 print(str(e))
                 raise e
@@ -76,6 +91,7 @@ Resources:
         Variables:
           TIMEOUT_THRESHOLD: !Ref IdleTimeout
           ALARM_PERIOD: !Ref AlarmPeriod
+          SET_ALARM_OK: !Ref AlarmState
   EventBridgeLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -106,6 +122,7 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                   - 'cloudwatch:GetMetricData'
+                  - 'cloudwatch:SetAlarmState'
                 Resource: '*'  
               - Effect: Allow
                 Action:
@@ -114,6 +131,7 @@ Resources:
                 Resource: 
                   - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*/*/canvas/default
                   - !Sub arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:app/*/*/Canvas/default
+                  
   TimeSinceLastActiveAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

@@ -14,6 +14,14 @@ Parameters:
     Description: The domain ID to monitor for idle Canvas apps.
     AllowedPattern: 'd-[a-zA-Z0-9]{12}'
     ConstraintDescription: Must start with 'd-' followed by 12 alphanumeric characters.
+  AlarmState:
+    Type: String
+    AllowedValues: 
+      - "True"
+      - "False"
+    Default: "True"
+    Description: Should your Lambda function automatically set the alarm status to OK after execution. 
+
 
 Resources:
   DeleteCanvasAppFunction:
@@ -34,7 +42,7 @@ Resources:
           import datetime
           
           def lambda_handler(event, context):
-              region = event['region']
+              region = event['region'] 
               
               try:
                 config = Config(region_name=region)
@@ -45,7 +53,7 @@ Resources:
                   MetricDataQueries=[
                       {
                           "Id": "q1",
-                          "Expression": f'SELECT AVG(TimeSinceLastActive) FROM "/aws/sagemaker/Canvas/AppActivity" WHERE DomainId=\'{os.environ['DOMAIN_ID']}\' GROUP BY DomainId, UserProfileName',
+                          "Expression": f'SELECT AVG(TimeSinceLastActive) FROM "/aws/sagemaker/Canvas/AppActivity" WHERE DomainId=\'{os.environ["DOMAIN_ID"]}\' GROUP BY DomainId, UserProfileName',
                           "Period": int(os.environ['ALARM_PERIOD'])
                       }
                   ],
@@ -74,6 +82,13 @@ Resources:
                     else:
                       print(f"Canvas App for {user_profile_name} in domain {domain_id} is in {status} status. Will not delete for now.")
                       continue
+                    if os.environ['SET_ALARM_OK'] == "True":
+                      cw_alarm = event['detail']['alarmName']
+                      resp = cloudwatch.set_alarm_state(
+                        AlarmName=cw_alarm,
+                        StateValue='OK',
+                        StateReason='Set to OK by Canvas Shutdown Lambda function',
+                        StateReasonData='{"actionOrigin": "CanvasShutdownAutomation"}') 
               except Exception as e:
                 print(str(e))
                 raise e
@@ -82,6 +97,7 @@ Resources:
           TIMEOUT_THRESHOLD: !Ref IdleTimeout
           ALARM_PERIOD: !Ref AlarmPeriod
           DOMAIN_ID: !Ref DomainId
+          SET_ALARM_OK: !Ref AlarmState
   EventBridgeLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -112,6 +128,8 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                   - 'cloudwatch:GetMetricData'
+                  - 'cloudwatch:SetAlarmState'
+                  - 'cloudwatch:DescribeAlarms'
                 Resource: '*'  
               - Effect: Allow
                 Action:
