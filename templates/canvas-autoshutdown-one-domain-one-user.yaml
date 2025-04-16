@@ -17,6 +17,13 @@ Parameters:
   UserProfileName: 
     Type: String
     Description: The domain ID to monitor for idle Canvas apps.
+  AlarmState:
+    Type: String
+    AllowedValues: 
+      - "True"
+      - "False"
+    Default: "True"
+    Description: Should your Lambda function automatically set the alarm status to OK after execution. 
 
 Resources:
   DeleteCanvasAppFunction:
@@ -48,7 +55,7 @@ Resources:
                   MetricDataQueries=[
                       {
                           "Id": "q1",
-                          "Expression": f'SELECT AVG(TimeSinceLastActive) FROM "/aws/sagemaker/Canvas/AppActivity" WHERE DomainId=\'{os.environ['DOMAIN_ID']}\' AND UserProfileName=\'{os.environ['USER_PROFILE_NAME']}\' GROUP BY DomainId, UserProfileName',
+                          "Expression": f'SELECT AVG(TimeSinceLastActive) FROM "/aws/sagemaker/Canvas/AppActivity" WHERE DomainId=\'{os.environ.get("DOMAIN_ID")}\' AND UserProfileName=\'{os.environ.get("USER_PROFILE_NAME")}\' GROUP BY DomainId, UserProfileName',
                           "Period": int(os.environ['ALARM_PERIOD'])
                       }
                   ],
@@ -77,6 +84,13 @@ Resources:
                     else:
                       print(f"Canvas App for {user_profile_name} in domain {domain_id} is in {status} status. Will not delete for now.")
                       continue
+                    if os.environ['SET_ALARM_OK'] == "True":
+                      cw_alarm = event['detail']['alarmName']
+                      resp = cloudwatch.set_alarm_state(
+                        AlarmName=cw_alarm,
+                        StateValue='OK',
+                        StateReason='Set to OK by Canvas Shutdown Lambda function',
+                        StateReasonData='{"actionOrigin": "CanvasShutdownAutomation"}') 
               except Exception as e:
                 print(str(e))
                 raise e
@@ -86,6 +100,7 @@ Resources:
           ALARM_PERIOD: !Ref AlarmPeriod
           DOMAIN_ID: !Ref DomainId
           USER_PROFILE_NAME: !Ref UserProfileName
+          SET_ALARM_OK: !Ref AlarmState
   EventBridgeLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -116,6 +131,7 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                   - 'cloudwatch:GetMetricData'
+                  - 'cloudwatch:SetAlarmState'
                 Resource: '*'  
               - Effect: Allow
                 Action:

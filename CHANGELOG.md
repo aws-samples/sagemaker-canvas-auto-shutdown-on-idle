@@ -1,3 +1,8 @@
+# 0.3 (2025-04-01)
+
+- Minor update in a Lambda Function to correct the alarm action by setting the alarm state to "OK"
+- Addition IAM permision to allow lambda to set Alarm State
+
 # 0.2 (2024-05-15) - Minor Updates
 
 Addressing Issues #1 and #2. 
